@@ -69,13 +69,13 @@ st.sidebar.markdown("""
 
 # --- DATAGENERERING (LIVE-KÄNSLA) ---
 np.random.seed(42)
-tidsstämplar = pd.date_range(start=datetime.datetime.now().replace(hour=0, minute=0, second=0), periods=24, freq='h')
+peak_timmar = [7, 8, 9, 17, 18, 19]
 
 # Simulera nätfrekvens (ska ligga runt 50Hz, men dippa vid peak-timmar)
 frekvenser = []
-peak_timmar = [7, 8, 17, 18, 19] # Typiska tider då folk startar apparater och laddar bilar
+peak_timmar = [7, 8, 9, 17, 18, 19] # Fixat: Tider då folk startar apparater och laddar bilar
 for hour in range(24):
-    if hour in peak_timmar: # Peak-timmar då gungbrädan tippar
+    if hour in peak_timmar:
         freq = np.random.uniform(49.82, 49.92)
     else:
         freq = np.random.uniform(49.95, 50.05)
@@ -132,7 +132,7 @@ with col3:
 
 # --- REALTIDSVARNING OM DET ÄR KRIS ---
 st.markdown("---")
-senaste_frekvens = frekvenser[-1] # Hämtar det absolut senaste simulerade värdet korrekt
+senaste_frekvens = frekvenser[-1]
 if senaste_frekvens < 49.92:
     st.markdown(f'<div class="kris-flash">🚨 AKUT OBALANS DETEKTERAD: {senaste_frekvens:.2f} Hz! Autopiloten aktiverad. Ström matas ut till elnätet från bilarna just nu!</div>', unsafe_allow_html=True)
 else:
