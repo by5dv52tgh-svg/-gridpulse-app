@@ -1,125 +1,173 @@
 import streamlit as st
 import pandas as pd
 import random
+import datetime
 
-# 1. Konfigurera instrumentpanelens layout
+# 1. Konfigurera instrumentpanelen
 st.set_page_config(
-    page_title="GridPulse - Admin Dashboard V1G",
+    page_title="GridPulse - Global VPP Control Center",
     page_icon="⚡",
     layout="wide"
 )
 
-st.title("⚡ GridPulse - Admin Dashboard (V1G MVP)")
-st.subheader("Kontrollpanel för det digitala megabatteriet (Virtual Power Plant)")
-st.markdown("---")
-
-# 2. Initiera tillstånd (Session State) så att simulatorn minns data mellan klick
-if 'simulated_cars' not in st.session_state:
-    car_models = ["Tesla Model 3", "Volvo EX90", "VW ID.4", "Polestar 3", "Kia EV6", "BMW i4"]
-    cars_data = []
-    
-    # Skapa 10 unika simulerade testbilar
-    for i in range(1, 11):
-        model = random.choice(car_models)
-        soc = random.randint(25, 85)        # Batteriprocent
-        is_plugged = random.choice([True, True, True, False]) # 75% chans att sladden är i
-        is_home = random.choice([True, True, True, False])    # 75% chans att bilen är hemma
-        limit = 80                           # Ägarens trygghetsgräns
-        
-        # GridPulse Regleringslogik: Bilen måste ladda, vara hemma, och ha kapacitet kvar till gränsen
-        is_charging = is_plugged and soc < limit
-        is_eligible = is_plugged and is_home and is_charging
-        charge_power = round(random.uniform(3.7, 11.0), 1) if is_charging else 0.0
-        
-        cars_data.append({
-            "Bil-ID": f"GP-{1000 + i}",
-            "Modell": model,
-            "Batteri (SoC)": f"{soc}%",
-            "Trygghetsgräns": f"{limit}%",
-            "Inkopplad": "✅" if is_plugged else "❌",
-            "Hemma (GPS)": "✅" if is_home else "❌",
-            "Laddar nu": "✅" if is_charging else "❌",
-            "Reglerbar (V1G)": "Aktiv" if is_eligible else "Ej tillgänglig",
-            "Nuvarande Effekt (kW)": charge_power,
-            "_eligible_bool": is_eligible
-        })
-    
-    st.session_state['simulated_cars'] = pd.DataFrame(cars_data)
-    st.session_state['balance_status'] = "Normal (50.00 Hz)"
+# Initiera ackumulerad ekonomi i bakgrunden så att den minns klick
+if 'total_profit' not in st.session_state:
     st.session_state['total_profit'] = 0.0
     st.session_state['user_payout'] = 0.0
-
-# Hämta data från sessionen
-df = st.session_state['simulated_cars'].copy()
-eligible_mask = df["_eligible_bool"] == True
-total_cars = len(df)
-active_vpp_cars = df[eligible_mask].shape[0]
-total_kw_available = round(df[eligible_mask]["Nuvarande Effekt (kW)"].sum(), 1)
-
-# 3. Översiktskort (KPI-metrics)
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Totalt anslutna bilar", f"{total_cars} st")
-with col2:
-    st.metric("Aktiva V1G-reserver just nu", f"{active_vpp_cars} st")
-with col3:
-    st.metric("Tillgänglig Flex-effekt", f"{total_kw_available} kW")
-with col4:
-    status_emoji = "🟢" if st.session_state['balance_status'] == "Normal (50.00 Hz)" else "🔴"
-    st.metric("Elnätets Status", f"{status_emoji} {st.session_state['balance_status']}")
-
-st.markdown("---")
-
-# 4. Sidomeny (Sidebar) med interaktiva simulatorknappar
-st.sidebar.header("🕹️ Simulator-kontroller")
-st.sidebar.write("Använd knapparna för att testa hur systemets AI och ekonomi reagerar vid en nätkrasch.")
-
-if st.sidebar.button("🚨 Simulera Nätkrasch (Aktivera mFRR/aFRR)", type="primary"):
-    st.session_state['balance_status'] = "OBALANS (49.85 Hz)"
-    
-    # Priskalkylator vid kris (t.ex. 15 kr per kWh under en simulerad 15-minutersperiod)
-    kris_pris_per_kwh = 15.0
-    genererad_intakt = round(total_kw_available * 0.25 * kris_pris_per_kwh, 2)
-    
-    # Utför 25/75 vinstdelning
-    st.session_state['total_profit'] += round(genererad_intakt * 0.25, 2)
-    st.session_state['user_payout'] += round(genererad_intakt * 0.75, 2)
-    st.rerun()
-
-if st.sidebar.button("🔄 Återställ Elnätet till Normalläge"):
+    st.session_state['aggregator_payout'] = 0.0
+    st.session_state['co2_saved'] = 0.0
     st.session_state['balance_status'] = "Normal (50.00 Hz)"
-    st.rerun()
 
-# 5. Finansiell översikt (Visar ackumulerade pengar live)
-st.subheader("💰 Realiserad Ekonomi (25/75 Split från Stödtjänster)")
-col_fin1, col_fin2 = st.columns(2)
-with col_fin1:
-    st.info(f"**GridPulse Intäkt (25%):** {st.session_state['total_profit']:.2f} SEK")
-with col_fin2:
-    st.success(f"**Utbetalning till dina Bilägare (75%):** {st.session_state['user_payout']:.2f} SEK")
-
+st.title("⚡ GridPulse - Global VPP Control Center")
+st.subheader("Fas 1 (2026): V1G Smart-Pausning via Aggregator")
 st.markdown("---")
 
-# 6. Flottans status och visualisering av API-anrop
-st.subheader("🚗 Fordonsflottans Live-status (Realtidsdata)")
+# 2. Skapa flikar: En för affärsdemo och en för IQX-utvecklarna
+tab1, tab2 = st.tabs(["📊 Live VPP Simulator", "💻 IQX Technical Blueprint"])
 
-display_df = df.drop(columns=["_eligible_bool"])
+with tab1:
+    st.subheader("Simulera och skala ditt virtuella megabatteri")
+    
+    # Sidomeny för kontroller och skalbarhet
+    st.sidebar.header("🕹️ Skalbarhetskontroller")
+    st.sidebar.write("Justera storleken på ditt nätverk för att se hur ekonomin och miljönyttan skalar live.")
+    
+    # Skjutreglage för att simulera upp till 50 000 bilar
+    simulated_fleet_size = st.sidebar.slider("Välj antal registrerade elbilar i appen:", 10, 50000, 1000, step=10)
+    
+    # --- REALISTISK FILTRERINGSLOGIK (DIN ANALYS) ---
+    # 1. Hur många är inkopplade hemma just nu en vanlig kväll? (Ca 55%)
+    plugged_in_cars = int(simulated_fleet_size * 0.55)
+    
+    # 2. Hur många av dessa är under sin trygghetsgräns (t.ex. 60%) och laddar akut? 
+    # Dessa blockeras av systemet och kan EJ pausas. (Ca 30% av de inkopplade)
+    akut_laddande_cars = int(plugged_in_cars * 0.30)
+    
+    # 3. Hur många är redan fulladdade (100%)? De drar ingen el och kan EJ pausas. (Ca 40% av de inkopplade)
+    fulladdade_cars = int(plugged_in_cars * 0.40)
+    
+    # 4. Det perfekta reglerbara fönstret: Bilar som är MELLAN sin trygghetsgräns (t.ex. 60%) och 100%.
+    # Endast dessa bilar är aktiva V1G-reserver som kan pausas! (Resterande 30% av de inkopplade)
+    active_vpp_cars = int(plugged_in_cars * 0.30)
+    
+    # Genomsnittlig laddeffekt per bil i det reglerbara fönstret (Blandat 3.7kW och 11kW ger ca 7.4 kW snitt)
+    avg_kw_per_car = 7.4
+    total_kw_available = round(active_vpp_cars * avg_kw_per_car, 1)
+    total_mw_available = round(total_kw_available / 1000, 2)
+    
+    # Knappar för elnätskrasch
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Elnätshändelse (mFRR/aFRR)")
+    
+    if st.sidebar.button("🚨 Aktivera Smart-Pausning (Nätkrasch)", type="primary"):
+        st.session_state['balance_status'] = "OBALANS (49.85 Hz)"
+        
+        # Ersättning 2026: Snittpris på 300 kr per MW/timme under en simulerad 15-minutersperiod (0.25 timmar)
+        mw_price_per_hour = 300.0
+        total_payout_from_state = round(total_mw_available * 0.25 * mw_price_per_hour, 2)
+        
+        # Sätt ett minsta golv för demovisning om man bara testar med 10 bilar
+        if total_payout_from_state < 50.0:
+            total_payout_from_state = 100.0
+            
+        # 1. Mellanhanden (Aggregatorn) tar 10%
+        agg_share = round(total_payout_from_state * 0.10, 2)
+        remaining_pool = total_payout_from_state - agg_share
+        
+        # 2. GridPulse tar 25% av det som är kvar, Användarna får 75%
+        st.session_state['aggregator_payout'] += agg_share
+        st.session_state['total_profit'] += round(remaining_pool * 0.25, 2)
+        st.session_state['user_payout'] += round(remaining_pool * 0.75, 2)
+        
+        # Miljöberäkning: Ett oljekraftverk släpper ut ca 0.8 kg CO2 per kWh.
+        st.session_state['co2_saved'] += round((total_kw_available * 0.25) * 0.8 / 1000, 2)
+        st.rerun()
 
-if st.session_state['balance_status'] != "Normal (50.00 Hz)":
-    # Om nätet har kraschat: Visa visuellt att laddningen har stängts av (V1G i praktiken)
-    df.loc[eligible_mask, "Nuvarande Effekt (kW)"] = 0.0
-    df.loc[eligible_mask, "Laddar nu"] = "⏸️ Pausad"
+    if st.sidebar.button("🔄 Återställ Elnätet till Normalläge"):
+        st.session_state['balance_status'] = "Normal (50.00 Hz)"
+        st.rerun()
+
+    # KPI-Rutor överst på sidan (Här syns din exakta logik live)
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Registrerade bilar i appen", f"{simulated_fleet_size:,} st".replace(",", " "))
+    with col2:
+        st.metric("Reglerbara V1G-bilar (Mellan gräns & 100%)", f"{active_vpp_cars:,} st".replace(",", " "))
+    with col3:
+        st.metric("Faktisk tillgänglig Flex-effekt", f"{total_mw_available} MW")
+    with col4:
+        status_emoji = "🟢" if st.session_state['balance_status'] == "Normal (50.00 Hz)" else "🔴"
+        st.metric("Elnätets Frekvens", f"{status_emoji} {st.session_state['balance_status']}")
+
+    # En visuell förklaring för investerare baserad på din analys
+    st.info(f"📊 **Statistisk nedbrytning av din flotta just nu:** Av {simulated_fleet_size:,} bilar är {plugged_in_cars:,} st inkopplade på uppfarten. **{akut_laddande_cars:,} st** blockeras eftersom de är under sin trygghetsgräns, och **{fulladdade_cars:,} st** är redan fulladdade. Det ger oss **{active_vpp_cars:,} st aktiva bilar** som kan pausas live!".replace(",", " "))
+
+    st.markdown("---")
+
+    # Finansiell översikt och Miljönytta
+    st.subheader("💰 Realiserad Ekonomi & Miljönytta (Ackumulerat)")
+    col_fin1, col_fin2, col_fin3 = st.columns(3)
+    with col_fin1:
+        st.info(f"💼 **GridPulse Plattformsavgift (25%):** {st.session_state['total_profit']:,.2f} SEK".replace(",", " "))
+    with col_fin2:
+        st.success(f"👥 **Utbetalt till Bilägare (75%):** {st.session_state['user_payout']:,.2f} SEK".replace(",", " "))
+    with col_fin3:
+        st.warning(f"🌱 **Inbesparade CO2-utsläpp:** {st.session_state['co2_saved']:,} ton".replace(",", " "))
+        
+    st.caption(f"Notera: Aggregatorns (mellanhandens) 10% andel har dragits av från kalkylen ({st.session_state['aggregator_payout']:,.2f} SEK totalt).".replace(",", " "))
+
+    st.markdown("---")
+
+    # Live-utsnitt från databasen som visar de olika unika scenarierna
+    st.subheader("🚗 Live-scenarier från databasen (Exempelvy)")
     
-    st.warning("⚠️ **GridPulse AI har upptäckt obalans! Smart-paussignaler har skickats via molnet till alla aktiva fordon.**")
-    st.dataframe(df.drop(columns=["_eligible_bool"]), use_container_width=True)
+    sample_cars = [
+        {"vehicle_id": "GP-1001", "brand": "Tesla Model 3", "current_soc": "45%", "safety_limit_soc": "60%", "Status": "⚡ Laddar akut", "Reglerbar (V1G)": "❌ Låst (Under trygghetsgräns)"},
+        {"vehicle_id": "GP-1002", "brand": "Volvo EX90", "current_soc": "75%", "safety_limit_soc": "60%", "Status": "⏸️ Pausad via API" if st.session_state['balance_status'] != "Normal (50.00 Hz)" else "⚡ Laddar flexibelt", "Reglerbar (V1G)": "✅ Aktiv"},
+        {"vehicle_id": "GP-1003", "brand": "VW ID.4", "current_soc": "100%", "safety_limit_soc": "60%", "Status": "🔋 Fulladdad", "Reglerbar (V1G)": "❌ Ej tillgänglig (Klar)"},
+        {"vehicle_id": "GP-1004", "brand": "Polestar 3", "current_soc": "85%", "safety_limit_soc": "70%", "Status": "⏸️ Pausad via API" if st.session_state['balance_status'] != "Normal (50.00 Hz)" else "⚡ Laddar flexibelt", "Reglerbar (V1G)": "✅ Aktiv"},
+        {"vehicle_id": "GP-1005", "brand": "BMW i4", "current_soc": "30%", "safety_limit_soc": "80%", "Status": "⚡ Laddar akut", "Reglerbar (V1G)": "❌ Låst (Under trygghetsgräns)"}
+    ]
+    st.dataframe(pd.DataFrame(sample_cars), use_container_width=True)
+
+with tab2:
+    st.subheader("💻 IQX Technical Blueprint & Database Schema")
+    st.markdown("Detta underlag visar arkitekturen för backend-teamet på IQX.")
     
-    # Tekniskt underlag till IQX för att visa hur backend-anropen förväntas loggas
-    st.subheader("💻 API-Logg (Underlag för IQX backend-arkitektur)")
-    st.code(f"""
-[LOGG] Frekvensavvikelse upptäckt på elnätet. Aktiverar mFRR-reglering.
-[LOGG] Anropar Enode/Smartcar API: POST /v1/vehicles/bulk/charge-control -> {{"action": "PAUSE"}}
-[LOGG] API-Svar: 200 OK. {active_vpp_cars} fordon svarade och har tillfälligt pausat laddningen.
-[LOGG] Totalt avlastad effekt: {total_kw_available} kW levererat till aggregatorn.
-    """, language="bash")
-else:
-    st.dataframe(display_df, use_container_width=True)
+    st.info("💡 **Arkitektonisk strategi:** Vi använder mFRR/aFRR-marknaderna där svarstiden tillåts vara upp till 5-15 minuter. Detta eliminerar problemen med biltillverkarnas moln-latens (som ofta ligger på 10-30 sekunder).")
+    
+    st.subheader("Databas-tabeller (PostgreSQL / Relationell struktur)")
+    
+    st.markdown("**1. Tabell: `users` (Kundregister)**")
+    st.code("""
+    user_id       UUID PRIMARY KEY          # Unikt ID för bilägaren
+    first_name    VARCHAR(50) NOT NULL
+    last_name     VARCHAR(50) NOT NULL
+    email         VARCHAR(100) UNIQUE       # Autentisering
+    iban_account  VARCHAR(34) NOT NULL      # För 75%-utbetalningen
+    """, language="sql")
+
+    st.markdown("**2. Tabell: `vehicles` (Live IoT-status via Enode/Smartcar)**")
+    st.code("""
+    vehicle_id          UUID PRIMARY KEY
+    user_id             UUID REFERENCES users(user_id)
+    brand               VARCHAR(30) NOT NULL
+    api_access_token    TEXT NOT NULL            # Krypterad OAuth-nyckel till bilens moln
+    current_soc         INT NOT NULL             # Aktuell batteriprocent (0-100)
+    safety_limit_soc    INT DEFAULT 60           # Användarens trygghetsgräns
+    is_plugged_in       BOOLEAN DEFAULT FALSE    # Är laddsladden i?
+    is_at_home_gps      BOOLEAN DEFAULT FALSE    # GPS-verifiering (fuskspärr)
+    el_area             VARCHAR(5) NOT NULL      # SE1, SE2, SE3 eller SE4
+    """, language="sql")
+
+    st.markdown("**3. Tabell: `flex_transactions` (Avräkningslogg för 25/75 split)**")
+    st.code("""
+    transaction_id        UUID PRIMARY KEY
+    vehicle_id            UUID REFERENCES vehicles(vehicle_id)
+    shedded_power_kw      NUMERIC(4,1)             # Strypt effekt under kraschen
+    total_grid_payout     NUMERIC(8,2)             # Pengar erhållna från staten/aggregatorn
+    aggregator_share_sek  NUMERIC(8,2)             # Beräknas: total * 0.10
+    gridpulse_share_sek   NUMERIC(8,2)             # Beräknas: (total - aggregator_share) * 0.25
+    user_share_sek        NUMERIC(8,2)             # Beräknas: (total - aggregator_share) * 0.75
+    timestamp             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    """, language="sql")
